@@ -1,0 +1,92 @@
+anyio==4.6.2.post1
+argon2-cffi==23.1.0
+argon2-cffi-bindings==21.2.0
+arrow==1.3.0
+asttokens==2.4.1
+async-lru==2.0.4
+attrs==24.2.0
+bleach==6.2.0
+comm==0.2.2
+contourpy @ file:///home/conda/feedstock_root/build_artifacts/contourpy_1731428301407/work
+cycler @ file:///home/conda/feedstock_root/build_artifacts/cycler_1733332471406/work
+debugpy==1.8.9
+decorator==5.1.1
+defusedxml==0.7.1
+executing==2.1.0
+fastjsonschema==2.21.0
+fonttools @ file:///home/conda/feedstock_root/build_artifacts/fonttools_1738940303262/work
+fqdn==1.5.1
+h11==0.14.0
+httpcore==1.0.7
+httpx==0.27.2
+ipykernel==6.29.5
+ipython==8.29.0
+isoduration==20.11.0
+jedi==0.19.2
+Jinja2==3.1.4
+json5==0.10.0
+jsonpointer==3.0.0
+jsonschema==4.23.0
+jsonschema-specifications==2024.10.1
+jupyter-events==0.10.0
+jupyter-lsp==2.2.5
+jupyter_client==8.6.3
+jupyter_core==5.7.2
+jupyter_server==2.14.2
+jupyter_server_terminals==0.5.3
+jupyterlab==4.2.6
+jupyterlab_pygments==0.3.0
+jupyterlab_server==2.27.3
+kiwisolver @ file:///home/conda/feedstock_root/build_artifacts/kiwisolver_1736908181161/work
+matplotlib==3.10.0
+matplotlib-inline==0.1.7
+mistune==3.0.2
+munkres==1.1.4
+nbclient==0.10.0
+nbconvert==7.16.4
+nbformat==5.10.4
+nest-asyncio==1.6.0
+notebook==7.2.2
+notebook_shim==0.2.4
+numpy @ file:///croot/numpy_and_numpy_base_1736500434252/work/dist/numpy-2.2.1-cp312-cp312-linux_x86_64.whl#sha256=759c6ff0d8466e61708ba2ce9949a434531eed29c477c0ca6fb72140f932213e
+overrides==7.7.0
+packaging @ file:///home/conda/feedstock_root/build_artifacts/packaging_1733203243479/work
+pandocfilters==1.5.1
+parso==0.8.4
+pillow @ file:///home/conda/feedstock_root/build_artifacts/pillow_1735929693903/work
+platformdirs==4.3.6
+prometheus_client==0.21.0
+prompt_toolkit==3.0.48
+psutil @ file:///home/conda/feedstock_root/build_artifacts/psutil_1735327333081/work
+pure_eval==0.2.3
+Pygments==2.18.0
+pyparsing @ file:///home/conda/feedstock_root/build_artifacts/pyparsing_1735698276679/work
+PySide6==6.8.2
+python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/python-dateutil_1733215673016/work
+python-json-logger==2.0.7
+pyzmq==26.2.0
+rebound @ file:///home/conda/feedstock_root/build_artifacts/rebound_1735934064933/work
+reboundx==4.4.1
+referencing==0.35.1
+rfc3339-validator==0.1.4
+rfc3986-validator==0.1.1
+rpds-py==0.21.0
+scipy @ file:///home/conda/feedstock_root/build_artifacts/scipy-split_1736617226289/work/dist/scipy-1.15.1-cp312-cp312-linux_x86_64.whl#sha256=836f063a15d6923348afd81e68d968770fc613c30343e3d1fdc6e1134c8c8e52
+Send2Trash==1.8.3
+setuptools==73.0.1
+shiboken6==6.8.2
+six @ file:///home/conda/feedstock_root/build_artifacts/six_1733380938961/work
+sniffio==1.3.1
+stack-data==0.6.3
+terminado==0.18.1
+tinycss2==1.4.0
+tornado==6.4.2
+traitlets==5.14.3
+types-python-dateutil==2.9.0.20241003
+unicodedata2 @ file:///home/conda/feedstock_root/build_artifacts/unicodedata2_1736692508163/work
+uri-template==1.3.0
+wcwidth==0.2.13
+webcolors==24.11.1
+webencodings==0.5.1
+websocket-client==1.8.0
+wheel==0.45.1
