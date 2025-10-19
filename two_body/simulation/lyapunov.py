@@ -1,8 +1,8 @@
 """
 Calculo (placeholder) del exponente de Lyapunov maximo.
 """
-import math
 from __future__ import annotations
+import math
 from typing import Any, Dict, Iterable, Optional, Tuple
 from .rebound_adapter import ReboundSim
 
