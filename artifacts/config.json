@@ -1,0 +1,48 @@
+{
+  "t_end_short": 100.0,
+  "t_end_long": 1000.0,
+  "dt": 0.5,
+  "integrator": "whfast",
+  "preset_orbita": "circular_cm",
+  "m1_bounds": [
+    0.05,
+    10.0
+  ],
+  "m2_bounds": [
+    0.05,
+    10.0
+  ],
+  "G": 1.0,
+  "x0": [
+    -1.0,
+    0.0,
+    0.0,
+    -0.5,
+    1.0,
+    0.0,
+    0.0,
+    0.5
+  ],
+  "pop_size": 64,
+  "n_gen_step": 3,
+  "crossover": 0.9,
+  "mutation": 0.2,
+  "selection": "tournament",
+  "elitism": 1,
+  "seed": 42,
+  "max_epochs": 50,
+  "top_k_long": 8,
+  "stagnation_window": 5,
+  "stagnation_tol": 0.001,
+  "local_radius": 0.1,
+  "radius_decay": 0.9,
+  "time_budget_s": 1800.0,
+  "eval_budget": 10000,
+  "use_gpu": "auto",
+  "batch_size": 64,
+  "cache_exact_max": 2000,
+  "cache_approx_max": 5000,
+  "artifacts_dir": "artifacts",
+  "save_plots": false,
+  "headless": true
+}
