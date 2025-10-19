@@ -56,11 +56,7 @@ class FitnessEvaluator:
                     "m1": masses[0],
                     "m2": masses[1] if len(masses) > 1 else None,
                 }
-                ret = (
-                    estimator.mLCE_short(ctx, window=t_end)
-                    if horizon == "short"
-                    else estimator.mLCE_long(ctx, window=t_end)
-                )
+                ret = estimator.mLCE(ctx, window=t_end)
                 lam = float(ret.get("lambda", _np.inf))
                 fit = -lam
             except Exception:
