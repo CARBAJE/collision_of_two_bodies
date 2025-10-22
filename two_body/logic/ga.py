@@ -4,7 +4,7 @@ Motor de optimizacion evolutiva basado en pymoo (modo streaming).
 
 from __future__ import annotations
 import random
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 from ..core.config import Config
 
@@ -19,23 +19,28 @@ class StreamingGA:
         self._asked_X: Optional[Any] = None
         self._last_F: Optional[Any] = None
         self._rng = random.Random(cfg.seed)
-        self._reseed_center: Optional[Tuple[float, float]] = None
+        self._reseed_center: Optional[Tuple[float, ...]] = None
         self._reseed_radius: float = cfg.local_radius
+        self._bounds = [tuple(map(float, b)) for b in cfg.mass_bounds]
+        self._dim = len(self._bounds)
 
         try:
             from pymoo.algorithms.soo.nonconvex.ga import GA
             from pymoo.core.problem import Problem
+            from pymoo.operators.crossover.sbx import SBX
+            from pymoo.operators.mutation.pm import PolynomialMutation
+            from pymoo.operators.selection.tournament import TournamentSelection
 
-            class _TwoMassProblem(Problem):
-                def __init__(self, lb1: float, ub1: float, lb2: float, ub2: float):
+            class _MassProblem(Problem):
+                def __init__(self, lows: Sequence[float], highs: Sequence[float]):
                     import numpy as _np
 
                     super().__init__(
-                        n_var=2,
+                        n_var=len(lows),
                         n_obj=1,
                         n_constr=0,
-                        xl=_np.array([lb1, lb2], dtype=float),
-                        xu=_np.array([ub1, ub2], dtype=float),
+                        xl=_np.array(lows, dtype=float),
+                        xu=_np.array(highs, dtype=float),
                     )
 
                 def _evaluate(self, X, out, *args, **kwargs):
@@ -43,10 +48,45 @@ class StreamingGA:
 
                     out["F"] = _np.zeros((len(X), 1), dtype=float)
 
-            lo1, hi1 = cfg.m1_bounds
-            lo2, hi2 = cfg.m2_bounds
-            self._problem = _TwoMassProblem(lo1, hi1, lo2, hi2)
-            self._algorithm = GA(pop_size=cfg.pop_size, eliminate_duplicates=True)
+            lows = [b[0] for b in self._bounds]
+            highs = [b[1] for b in self._bounds]
+            self._problem = _MassProblem(lows, highs)
+            crossover = SBX(prob=max(0.0, min(1.0, float(cfg.crossover))), eta=15.0)
+            mut_prob = float(cfg.mutation)
+            if mut_prob <= 0.0:
+                mut_prob = 1.0 / self._dim
+            mutation = PolynomialMutation(prob=min(1.0, mut_prob), eta=20.0)
+            def _tournament(pop, P, **_kwargs):
+                import numpy as _np
+
+                F = pop.get("F")
+                winners: list[int] = []
+                for row in _np.atleast_2d(P):
+                    best_idx = int(row[0])
+                    best_fit = float(F[best_idx, 0])
+                    for cand in row[1:]:
+                        cand_idx = int(cand)
+                        cand_fit = float(F[cand_idx, 0])
+                        if cand_fit > best_fit:
+                            best_idx = cand_idx
+                            best_fit = cand_fit
+                    winners.append(best_idx)
+                return _np.array(winners, dtype=int)
+
+            selection = TournamentSelection(func_comp=_tournament)
+
+            self._algorithm = GA(
+                pop_size=cfg.pop_size,
+                eliminate_duplicates=bool(cfg.elitism > 0),
+                crossover=crossover,
+                mutation=mutation,
+                selection=selection if cfg.selection == "tournament" else None,
+            )
+            if cfg.selection != "tournament" and self.logger:
+                self.logger.warning(
+                    "Selection '%s' not supported explicitly; pymoo default will be used.",
+                    cfg.selection,
+                )
             self._algorithm.setup(self._problem, termination=None, seed=cfg.seed)
         except Exception as e:
             self._problem = None
@@ -55,36 +95,82 @@ class StreamingGA:
                 self.logger.warning(
                     "pymoo unavailable or setup failed: %s. Using internal sampler.", e
                 )
-            lo1, hi1 = cfg.m1_bounds
-            lo2, hi2 = cfg.m2_bounds
-            self._pop: List[Tuple[float, float]] = [
-                (
-                    self._rng.uniform(lo1, hi1),
-                    self._rng.uniform(lo2, hi2),
-                )
-                for _ in range(cfg.pop_size)
+            self._pop = self._init_random_population()
+
+    def _init_random_population(self) -> List[Tuple[float, ...]]:
+        return [
+            tuple(self._rng.uniform(*self._bounds[d]) for d in range(self._dim))
+            for _ in range(self.cfg.pop_size)
+        ]
+
+    def _sample_offspring(self, bounds: List[Tuple[float, float]]) -> List[float]:
+        child = [self._rng.uniform(*bounds[idx]) for idx in range(self._dim)]
+        population = getattr(self, "_pop", [])
+        cross_prob = max(0.0, min(1.0, float(self.cfg.crossover)))
+        if population and len(population) >= 2 and self._rng.random() < cross_prob:
+            p1, p2 = self._rng.sample(population, 2)
+            child = [
+                self._rng.uniform(min(p1[j], p2[j]), max(p1[j], p2[j]))
+                for j in range(self._dim)
             ]
+        mut_prob = float(self.cfg.mutation)
+        if mut_prob <= 0.0:
+            mut_prob = 1.0 / self._dim
+        if self._rng.random() < min(1.0, mut_prob):
+            gene_idx = self._rng.randrange(self._dim)
+            span = bounds[gene_idx][1] - bounds[gene_idx][0]
+            perturb = self._rng.uniform(-0.5, 0.5) * span * 0.1
+            child[gene_idx] = min(
+                max(child[gene_idx] + perturb, bounds[gene_idx][0]),
+                bounds[gene_idx][1],
+            )
+        return child
 
     def step(self, generations: float = 1.0) -> None:
         if self._algorithm is None:
             if getattr(self, "_pop", None) is None:
-                self._pop = self.current_population()
-            lo1, hi1 = self.cfg.m1_bounds
-            lo2, hi2 = self.cfg.m2_bounds
+                self._pop = self._init_random_population()
+            bounds = self._bounds
             center = self._reseed_center
             radius = self._reseed_radius
-            new_pop: List[Tuple[float, float]] = []
-            for _ in range(self.cfg.pop_size):
+            elites: List[Tuple[float, ...]] = []
+            if (
+                self.cfg.elitism > 0
+                and self._last_F is not None
+                and getattr(self, "_pop", None) is not None
+            ):
+                try:
+                    scores = [float(val[0]) for val in list(self._last_F)]
+                except Exception:
+                    scores = []
+                if scores:
+                    ranked = sorted(
+                        range(len(self._pop)),
+                        key=lambda i: scores[i],
+                        reverse=True,
+                    )
+                    for idx in ranked[: min(self.cfg.elitism, len(self._pop))]:
+                        elites.append(self._pop[idx])
+            new_pop: List[Tuple[float, ...]] = list(elites)
+            while len(new_pop) < self.cfg.pop_size:
                 if center is not None:
-                    m1 = min(max(center[0] + self._rng.uniform(-radius, radius), lo1), hi1)
-                    m2 = min(max(center[1] + self._rng.uniform(-radius, radius), lo2), hi2)
+                    genes = [
+                        min(
+                            max(
+                                center[idx] + self._rng.uniform(-radius, radius),
+                                bounds[idx][0],
+                            ),
+                            bounds[idx][1],
+                        )
+                        for idx in range(self._dim)
+                    ]
                 else:
-                    m1 = self._rng.uniform(lo1, hi1)
-                    m2 = self._rng.uniform(lo2, hi2)
-                new_pop.append((m1, m2))
+                    genes = self._sample_offspring(bounds)
+                new_pop.append(tuple(genes))
             self._pop = new_pop
             self._asked_pop = None
             self._asked_X = None
+            self._last_F = None
             return
 
         if self._asked_pop is None or self._asked_X is None:
@@ -103,33 +189,25 @@ class StreamingGA:
             self._asked_X = None
             self._last_F = None
 
-    def current_population(self) -> List[Tuple[float, float]]:
+    def current_population(self) -> List[Tuple[float, ...]]:
         import numpy as _np
 
         if self._algorithm is None:
             if getattr(self, "_pop", None) is None:
-                lo1, hi1 = self.cfg.m1_bounds
-                lo2, hi2 = self.cfg.m2_bounds
+                bounds = self._bounds
                 center = self._reseed_center
                 radius = self._reseed_radius
                 self._pop = [
-                    (
+                    tuple(
                         min(
                             max(
-                                (center[0] if center else self._rng.uniform(lo1, hi1))
+                                (center[idx] if center else self._rng.uniform(*bounds[idx]))
                                 + (self._rng.uniform(-radius, radius) if center else 0.0),
-                                lo1,
+                                bounds[idx][0],
                             ),
-                            hi1,
-                        ),
-                        min(
-                            max(
-                                (center[1] if center else self._rng.uniform(lo2, hi2))
-                                + (self._rng.uniform(-radius, radius) if center else 0.0),
-                                lo2,
-                            ),
-                            hi2,
-                        ),
+                            bounds[idx][1],
+                        )
+                        for idx in range(self._dim)
                     )
                     for _ in range(self.cfg.pop_size)
                 ]
@@ -141,30 +219,35 @@ class StreamingGA:
             pop = self._algorithm.ask()
             X = pop.get("X")
             if self._reseed_center is not None and self._reseed_radius > 0:
-                lo1, hi1 = self.cfg.m1_bounds
-                lo2, hi2 = self.cfg.m2_bounds
-                c1, c2 = self._reseed_center
+                bounds = self._bounds
+                center = self._reseed_center
                 rad = self._reseed_radius
                 for i in range(len(X)):
-                    X[i, 0] = float(_np.clip(c1 + (self._rng.uniform(-rad, rad)), lo1, hi1))
-                    X[i, 1] = float(_np.clip(c2 + (self._rng.uniform(-rad, rad)), lo2, hi2))
+                    for j in range(self._dim):
+                        X[i, j] = float(
+                            _np.clip(
+                                center[j] + self._rng.uniform(-rad, rad),
+                                bounds[j][0],
+                                bounds[j][1],
+                            )
+                        )
             pop.set("X", X)
             self._asked_pop = pop
             self._asked_X = X
 
-        return [(float(x[0]), float(x[1])) for x in X]
+        return [tuple(float(x[j]) for j in range(self._dim)) for x in X]
 
-    def warm_start_around(self, x: Tuple[float, float], radius: float) -> None:
-        self._reseed_center = (float(x[0]), float(x[1]))
+    def warm_start_around(self, x: Tuple[float, ...], radius: float) -> None:
+        self._reseed_center = tuple(float(xi) for xi in x)
         self._reseed_radius = max(1e-9, float(radius))
 
-    def reseed_around(self, x: Tuple[float, float], radius: float) -> None:
-        self._reseed_center = (float(x[0]), float(x[1]))
+    def reseed_around(self, x: Tuple[float, ...], radius: float) -> None:
+        self._reseed_center = tuple(float(xi) for xi in x)
         self._reseed_radius = max(1e-9, float(radius))
         self._asked_pop = None
         self._asked_X = None
 
-    def local_exploration(self, center: Tuple[float, float], radius: float) -> None:
+    def local_exploration(self, center: Tuple[float, ...], radius: float) -> None:
         self.warm_start_around(center, radius)
 
 

@@ -20,7 +20,7 @@ class FitnessEvaluator:
         self.cfg = cfg
         self.logger = logger or logging.getLogger("master_two_body_opt")
 
-    def evaluate_batch(self, candidates: List[Tuple[float, float]], horizon: str = "short") -> List[float]:
+    def evaluate_batch(self, candidates: List[Tuple[float, ...]], horizon: str = "short") -> List[float]:
         import numpy as _np
 
         if len(candidates) == 0:
@@ -32,17 +32,27 @@ class FitnessEvaluator:
         estimator = LyapunovEstimator()
         base_r0 = self.cfg.r0
         base_v0 = self.cfg.v0
+        bounds = self.cfg.mass_bounds
 
         results: List[float] = []
-        for (m1, m2) in candidates:
-            key_exact = (round(float(m1), 12), round(float(m2), 12), horizon)
+        for masses_raw in candidates:
+            masses_tuple = tuple(float(m) for m in masses_raw)
+            key_exact = tuple(round(m, 12) for m in masses_tuple) + (horizon,)
             cached = self.cache.get_exact(key_exact)
             if cached is not None:
                 results.append(float(cached))
                 continue
 
             try:
-                masses = (float(m1), float(m2))
+                masses = masses_tuple
+                if len(masses) != len(bounds):
+                    raise ValueError(
+                        f"Cantidad de masas ({len(masses)}) no coincide con mass_bounds ({len(bounds)})."
+                    )
+                for idx, m in enumerate(masses):
+                    lo, hi = bounds[idx]
+                    if m < lo or m > hi:
+                        raise ValueError(f"Masa[{idx}]={m} fuera de [{lo}, {hi}].")
                 if len(base_r0) < len(masses) or len(base_v0) < len(masses):
                     raise ValueError("Config.r0 y Config.v0 deben definir al menos tantas entradas como masas.")
                 r0 = tuple(base_r0[i] for i in range(len(masses)))
@@ -53,9 +63,14 @@ class FitnessEvaluator:
                     "dt": dt,
                     "t_end": t_end,
                     "masses": masses,
-                    "m1": masses[0],
-                    "m2": masses[1] if len(masses) > 1 else None,
+                    "masses": masses,
                 }
+                if len(masses) > 0:
+                    ctx["m1"] = masses[0]
+                if len(masses) > 1:
+                    ctx["m2"] = masses[1]
+                if len(masses) > 2:
+                    ctx["m3"] = masses[2]
                 ret = estimator.mLCE(ctx, window=t_end)
                 lam = float(ret.get("lambda", _np.inf))
                 fit = -lam

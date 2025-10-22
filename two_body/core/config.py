@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 try:
     import numpy as np  # type: ignore  # noqa: F401
@@ -31,15 +31,19 @@ class Config:
     r0: Tuple[Tuple[float, float, float], ...] = (
         (-1.0, 0.0, 0.0),
         (1.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
     )
     v0: Tuple[Tuple[float, float, float], ...] = (
         (0.0, -0.5, 0.0),
         (0.0, 0.5, 0.0),
+        (0.0, 0.0, 0.0),
     )
 
     # Parametros fisicos
-    m1_bounds: Tuple[float, float] = (0.05, 10.0)
-    m2_bounds: Tuple[float, float] = (0.05, 10.0)
+    mass_bounds: Tuple[Tuple[float, float], ...] = (
+        (0.05, 10.0),
+        (0.05, 10.0),
+    )
     G: float = 1.0
     # Estado inicial estandar (legacy) para compatibilidad con scripts antiguos
     x0: Tuple[float, ...] = (-1.0, 0.0, 0.0, -0.5, 1.0, 0.0, 0.0, 0.5)

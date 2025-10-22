@@ -43,9 +43,16 @@ class MetricsLogger:
         self.epochs = 0
         self.reseeds = 0
         self.best_lambda_per_epoch: List[float] = []
+        self.epoch_history: List[Dict[str, Any]] = []
 
     def mark_phase(self, name: str) -> None:
         self.phases[name] = time.time() - self.start_time
+
+    def record_epoch(self, payload: Dict[str, Any]) -> None:
+        """
+        Registra informacion resumida de cada epoca para analisis posterior.
+        """
+        self.epoch_history.append(payload)
 
     def to_dict(self) -> Dict[str, Any]:
         total = max(time.time() - self.start_time, 1e-9)
@@ -70,6 +77,7 @@ class MetricsLogger:
                 "hit_rate": hit_rate,
             },
             "best_lambda_per_epoch": self.best_lambda_per_epoch,
+            "epoch_history": self.epoch_history,
         }
 
 

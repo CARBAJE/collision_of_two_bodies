@@ -24,7 +24,7 @@ class ParameterModifier:
     def on_stagnation(
         self,
         ga: StreamingGA,
-        best: Optional[Tuple[float, float]],
+        best: Optional[Tuple[float, ...]],
         radius: float,
     ) -> float:
         """
