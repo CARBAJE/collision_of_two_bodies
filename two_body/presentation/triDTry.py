@@ -80,13 +80,12 @@ class Visualizer:
             for i, (point, traj) in enumerate(zip(points, trajectories)):
                 
                 x, y, z = traj[frame, 0], traj[frame, 1], traj[frame, 2]
-                point.set_data_3d(x, y, z)
                 
-                
+                point.set_data_3d([x], [y], [z])
                 
                 
             ax.set_title(f"{title}\nTiempo: {frame}/{total_frames}")
-            return points 
+            return points
         
         
         num_frames = min(total_frames, min(len(t) for t in trajectories))
@@ -99,9 +98,38 @@ class Visualizer:
             repeat=True 
         )
 
+        # if not self.headless:
+        #     return ani 
+        # else:
+        #     plt.close()
+        #     return None
+
         
         if not self.headless:
             
             plt.show()
         else:
             plt.close()
+
+if __name__ == "__main__":
+    if MATPLOTLIB_AVAILABLE:
+        import numpy as np
+        
+        N_STEPS = 500
+        t = np.linspace(0, 10 * np.pi, N_STEPS)
+        x = np.cos(t)
+        y = np.sin(t)
+        z = t * 0.1 
+        
+        dummy_3d = np.column_stack((x, y, z))
+    
+        viz = Visualizer(headless=False)
+        
+        anim = viz.animate_3d(
+            trajectories=[dummy_3d],
+            interval_ms=50,
+            title="Prueba de Hélice 3D"
+        )
+    else:
+        print("Asegúrate de tener instalados NumPy y Matplotlib para ejecutar el ejemplo.")
+
