@@ -4,22 +4,51 @@ Calculo (placeholder) del exponente de Lyapunov maximo.
 from __future__ import annotations
 import math
 from typing import Any, Dict, Iterable, Optional, Tuple
+
+from ..perf_timings.timers import time_block, time_section
 from .rebound_adapter import ReboundSim
 
+def _resolve_timing_meta(trajectory: Any, timing_meta: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if timing_meta is not None:
+        return timing_meta
+    if isinstance(trajectory, dict):
+        meta = trajectory.get("timing_meta")
+        if isinstance(meta, dict):
+            return meta
+    return None
+
+
 class LyapunovEstimator:
+    @time_section(
+        "lyapunov_compute",
+        epoch=lambda self, trajectory=None, x0=None, window=100.0, timing_meta=None: int(
+            (_resolve_timing_meta(trajectory, timing_meta) or {}).get("epoch", -1)
+        ),
+        batch_id=lambda self, trajectory=None, x0=None, window=100.0, timing_meta=None: int(
+            (_resolve_timing_meta(trajectory, timing_meta) or {}).get("batch_id", -1)
+        ),
+        individual_id=lambda self, trajectory=None, x0=None, window=100.0, timing_meta=None: int(
+            (_resolve_timing_meta(trajectory, timing_meta) or {}).get("individual_id", -1)
+        ),
+        extra=lambda self, trajectory=None, x0=None, window=100.0, timing_meta=None: {"window": window},
+    )
     def mLCE(
         self,
         trajectory: Any = None,
         x0: Optional[Iterable[float]] = None,
         window: float = 100.0,
+        timing_meta: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        timing_meta = _resolve_timing_meta(trajectory, timing_meta)
         try:
-            lam, series, meta = self._mlce_with_context(trajectory, window)
+            lam, series, meta = self._mlce_with_context(trajectory, window, timing_meta=timing_meta)
             return {"lambda": lam, "series": series, "meta": meta}
         except Exception as e:
             return {"lambda": float("inf"), "series": None, "meta": {"impl": "error", "err": str(e)}}
 
-    def _mlce_with_context(self, ctx: Any, window: float) -> Tuple[float, Optional[Any], Dict[str, Any]]:
+    def _mlce_with_context(
+        self, ctx: Any, window: float, timing_meta: Optional[Dict[str, Any]] = None
+    ) -> Tuple[float, Optional[Any], Dict[str, Any]]:
         import numpy as _np
 
         try:
@@ -51,7 +80,13 @@ class LyapunovEstimator:
 
         steps = max(1, math.ceil(t_end / dt)) if t_end is not None else 1
 
-        lam, info = self._mlce_rebound_variational(sim, dt=dt, steps=steps)
+        resolved_meta = timing_meta
+        if resolved_meta is None and isinstance(ctx, dict):
+            candidate_meta = ctx.get("timing_meta")
+            if isinstance(candidate_meta, dict):
+                resolved_meta = candidate_meta
+
+        lam, info = self._mlce_rebound_variational(sim, dt=dt, steps=steps, timing_meta=resolved_meta)
         meta = {"steps": steps, "dt": dt, "n_bodies": len(masses), "masses": masses}
         if info:
             meta.update(info)
@@ -76,7 +111,9 @@ class LyapunovEstimator:
 
         return tuple(masses), tuple(positions), tuple(velocities)
 
-    def _mlce_rebound_variational(self, sim: Any, dt: float, steps: int) -> Tuple[float, Dict[str, Any]]:
+    def _mlce_rebound_variational(
+        self, sim: Any, dt: float, steps: int, timing_meta: Optional[Dict[str, Any]] = None
+    ) -> Tuple[float, Dict[str, Any]]:
         if not hasattr(sim, "particles"):
             raise RuntimeError("Invalid REBOUND Simulation provided")
         try:
@@ -84,9 +121,22 @@ class LyapunovEstimator:
             sim.dt = dt
             base_t = getattr(sim, "t", 0.0)
 
+            meta = timing_meta or {}
+            epoch = int(meta.get("epoch", -1))
+            batch_id = int(meta.get("batch_id", -1))
+            individual_id = int(meta.get("individual_id", -1))
+
             sim.init_megno()
             for i in range(steps):
-                sim.integrate(base_t + (i + 1) * dt)
+                t_target = base_t + (i + 1) * dt
+                with time_block(
+                    "simulation_step",
+                    epoch=epoch,
+                    batch_id=batch_id,
+                    individual_id=individual_id,
+                    extra={"step": i, "dt": dt, "t_target": t_target},
+                ):
+                    sim.integrate(t_target)
 
             megno_val: Optional[float]
             megno_val = None

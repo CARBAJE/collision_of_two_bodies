@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Tuple
 
+from ..perf_timings.timers import time_block
+
 
 class ReboundSim:
     def __init__(self, G: float = 1.0, integrator: str = "whfast") -> None:
@@ -78,14 +80,19 @@ class ReboundSim:
         base_t = sim.t if hasattr(sim, "t") else 0.0
         for i in range(steps):
             t_target = base_t + (i + 1) * dt
-            sim.integrate(t_target)
-            for j, p in enumerate(sim.particles):
-                traj[i, j, 0] = float(p.x)
-                traj[i, j, 1] = float(p.y)
-                traj[i, j, 2] = float(p.z)
-                traj[i, j, 3] = float(p.vx)
-                traj[i, j, 4] = float(p.vy)
-                traj[i, j, 5] = float(p.vz)
+            with time_block(
+                "simulation_step",
+                batch_id=i,
+                extra={"dt": dt, "t_target": t_target, "n_bodies": n_bodies},
+            ):
+                sim.integrate(t_target)
+                for j, p in enumerate(sim.particles):
+                    traj[i, j, 0] = float(p.x)
+                    traj[i, j, 1] = float(p.y)
+                    traj[i, j, 2] = float(p.z)
+                    traj[i, j, 3] = float(p.vx)
+                    traj[i, j, 4] = float(p.vy)
+                    traj[i, j, 5] = float(p.vz)
         return traj
 
 

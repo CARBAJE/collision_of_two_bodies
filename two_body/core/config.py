@@ -28,6 +28,7 @@ class Config:
     t_end_long: float = 1000.0
     dt: float = 0.5
     integrator: str = "whfast"
+    periodicity_weight: float = 0.0
     r0: Tuple[Tuple[float, float, float], ...] = (
         (-1.0, 0.0, 0.0),
         (1.0, 0.0, 0.0),
@@ -44,6 +45,9 @@ class Config:
         (0.05, 10.0),
         (0.05, 10.0),
     )
+    mass_distribution: str = "uniform"  # "uniform" | "beta"
+    mass_beta_alpha: float = 1.0
+    mass_beta_beta: float = 1.0
     G: float = 1.0
     # Estado inicial estandar (legacy) para compatibilidad con scripts antiguos
     x0: Tuple[float, ...] = (-1.0, 0.0, 0.0, -0.5, 1.0, 0.0, 0.0, 0.5)

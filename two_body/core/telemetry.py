@@ -43,6 +43,7 @@ class MetricsLogger:
         self.epochs = 0
         self.reseeds = 0
         self.best_lambda_per_epoch: List[float] = []
+        self.best_fitness_per_epoch: List[float] = []
         self.epoch_history: List[Dict[str, Any]] = []
 
     def mark_phase(self, name: str) -> None:
@@ -77,6 +78,7 @@ class MetricsLogger:
                 "hit_rate": hit_rate,
             },
             "best_lambda_per_epoch": self.best_lambda_per_epoch,
+            "best_fitness_per_epoch": self.best_fitness_per_epoch,
             "epoch_history": self.epoch_history,
         }
 

@@ -7,6 +7,7 @@ import random
 from typing import Any, List, Optional, Sequence, Tuple
 
 from ..core.config import Config
+from ..perf_timings.timers import time_block, time_section
 
 
 class StreamingGA:
@@ -23,13 +24,45 @@ class StreamingGA:
         self._reseed_radius: float = cfg.local_radius
         self._bounds = [tuple(map(float, b)) for b in cfg.mass_bounds]
         self._dim = len(self._bounds)
+        self._mass_distribution = getattr(cfg, "mass_distribution", "uniform").lower()
+        if self._mass_distribution not in {"uniform", "beta"}:
+            if self.logger:
+                self.logger.warning(
+                    "Mass distribution '%s' no soportada; se usara uniforme.",
+                    self._mass_distribution,
+                )
+            self._mass_distribution = "uniform"
+        self._beta_alpha = self._normalize_beta_param(
+            getattr(cfg, "mass_beta_alpha", 1.0),
+            "mass_beta_alpha",
+        )
+        self._beta_beta = self._normalize_beta_param(
+            getattr(cfg, "mass_beta_beta", 1.0),
+            "mass_beta_beta",
+        )
 
         try:
             from pymoo.algorithms.soo.nonconvex.ga import GA
             from pymoo.core.problem import Problem
+            from pymoo.core.sampling import Sampling
             from pymoo.operators.crossover.sbx import SBX
             from pymoo.operators.mutation.pm import PolynomialMutation
             from pymoo.operators.selection.tournament import TournamentSelection
+
+            class _TimedSBX(SBX):
+                def do(self, *args, **kwargs):
+                    with time_block("crossover", extra={"impl": "SBX"}):
+                        return super().do(*args, **kwargs)
+
+            class _TimedPolynomialMutation(PolynomialMutation):
+                def do(self, *args, **kwargs):
+                    with time_block("mutation", extra={"impl": "PolynomialMutation"}):
+                        return super().do(*args, **kwargs)
+
+            class _TimedTournamentSelection(TournamentSelection):
+                def do(self, *args, **kwargs):
+                    with time_block("selection_tournament", extra={"impl": "pymoo"}):
+                        return super().do(*args, **kwargs)
 
             class _MassProblem(Problem):
                 def __init__(self, lows: Sequence[float], highs: Sequence[float]):
@@ -48,14 +81,45 @@ class StreamingGA:
 
                     out["F"] = _np.zeros((len(X), 1), dtype=float)
 
+            class _BetaSampling(Sampling):
+                def __init__(
+                    self,
+                    lows: Sequence[float],
+                    highs: Sequence[float],
+                    alpha: Sequence[float],
+                    beta: Sequence[float],
+                    rng: random.Random,
+                ) -> None:
+                    super().__init__()
+                    self._lows = tuple(float(v) for v in lows)
+                    self._highs = tuple(float(v) for v in highs)
+                    self._alpha = tuple(float(v) for v in alpha)
+                    self._beta = tuple(float(v) for v in beta)
+                    self._rng = rng
+
+                def _do(self, problem, n_samples, **kwargs):
+                    import numpy as _np
+
+                    n_dim = len(self._lows)
+                    X = _np.empty((n_samples, n_dim), dtype=float)
+                    for i in range(n_samples):
+                        for j in range(n_dim):
+                            alpha = self._alpha[j % len(self._alpha)]
+                            beta = self._beta[j % len(self._beta)]
+                            beta_val = self._rng.betavariate(alpha, beta)
+                            X[i, j] = self._lows[j] + beta_val * (
+                                self._highs[j] - self._lows[j]
+                            )
+                    return X
+
             lows = [b[0] for b in self._bounds]
             highs = [b[1] for b in self._bounds]
             self._problem = _MassProblem(lows, highs)
-            crossover = SBX(prob=max(0.0, min(1.0, float(cfg.crossover))), eta=15.0)
+            crossover = _TimedSBX(prob=max(0.0, min(1.0, float(cfg.crossover))), eta=15.0)
             mut_prob = float(cfg.mutation)
             if mut_prob <= 0.0:
                 mut_prob = 1.0 / self._dim
-            mutation = PolynomialMutation(prob=min(1.0, mut_prob), eta=20.0)
+            mutation = _TimedPolynomialMutation(prob=min(1.0, mut_prob), eta=20.0)
             def _tournament(pop, P, **_kwargs):
                 import numpy as _np
 
@@ -73,15 +137,28 @@ class StreamingGA:
                     winners.append(best_idx)
                 return _np.array(winners, dtype=int)
 
-            selection = TournamentSelection(func_comp=_tournament)
+            selection = _TimedTournamentSelection(func_comp=_tournament)
+            sampling = None
+            if self._mass_distribution == "beta":
+                sampling = _BetaSampling(
+                    lows,
+                    highs,
+                    self._beta_alpha,
+                    self._beta_beta,
+                    self._rng,
+                )
 
-            self._algorithm = GA(
-                pop_size=cfg.pop_size,
-                eliminate_duplicates=bool(cfg.elitism > 0),
-                crossover=crossover,
-                mutation=mutation,
-                selection=selection if cfg.selection == "tournament" else None,
-            )
+            ga_kwargs = {
+                "pop_size": cfg.pop_size,
+                "eliminate_duplicates": bool(cfg.elitism > 0),
+                "crossover": crossover,
+                "mutation": mutation,
+                "selection": selection if cfg.selection == "tournament" else None,
+            }
+            if sampling is not None:
+                ga_kwargs["sampling"] = sampling
+
+            self._algorithm = GA(**ga_kwargs)
             if cfg.selection != "tournament" and self.logger:
                 self.logger.warning(
                     "Selection '%s' not supported explicitly; pymoo default will be used.",
@@ -99,34 +176,68 @@ class StreamingGA:
 
     def _init_random_population(self) -> List[Tuple[float, ...]]:
         return [
-            tuple(self._rng.uniform(*self._bounds[d]) for d in range(self._dim))
+            tuple(self._sample_gene(d) for d in range(self._dim))
             for _ in range(self.cfg.pop_size)
         ]
 
+    def _normalize_beta_param(self, raw: Any, name: str) -> Tuple[float, ...]:
+        if isinstance(raw, (list, tuple)):
+            values = tuple(float(v) for v in raw)
+        else:
+            values = (float(raw),)
+        if not values or any(val <= 0.0 for val in values):
+            raise ValueError(f"{name} debe contener valores positivos.")
+        return values
+
+    def _sample_gene(
+        self, idx: int, bounds: Optional[Sequence[Tuple[float, float]]] = None
+    ) -> float:
+        limits = bounds if bounds is not None else self._bounds
+        lo, hi = limits[idx]
+        if self._mass_distribution == "beta":
+            alpha = self._beta_alpha[idx % len(self._beta_alpha)]
+            beta = self._beta_beta[idx % len(self._beta_beta)]
+            beta_val = self._rng.betavariate(alpha, beta)
+            return lo + beta_val * (hi - lo)
+        return self._rng.uniform(lo, hi)
+
     def _sample_offspring(self, bounds: List[Tuple[float, float]]) -> List[float]:
-        child = [self._rng.uniform(*bounds[idx]) for idx in range(self._dim)]
+        child = [self._sample_gene(idx, bounds) for idx in range(self._dim)]
         population = getattr(self, "_pop", [])
         cross_prob = max(0.0, min(1.0, float(self.cfg.crossover)))
         if population and len(population) >= 2 and self._rng.random() < cross_prob:
-            p1, p2 = self._rng.sample(population, 2)
-            child = [
-                self._rng.uniform(min(p1[j], p2[j]), max(p1[j], p2[j]))
-                for j in range(self._dim)
-            ]
+            with time_block(
+                "crossover",
+                extra={"impl": "fallback", "pop_size": len(population)},
+            ):
+                p1, p2 = self._rng.sample(population, 2)
+                child = [
+                    self._rng.uniform(min(p1[j], p2[j]), max(p1[j], p2[j]))
+                    for j in range(self._dim)
+                ]
         mut_prob = float(self.cfg.mutation)
         if mut_prob <= 0.0:
             mut_prob = 1.0 / self._dim
         if self._rng.random() < min(1.0, mut_prob):
-            gene_idx = self._rng.randrange(self._dim)
-            span = bounds[gene_idx][1] - bounds[gene_idx][0]
-            perturb = self._rng.uniform(-0.5, 0.5) * span * 0.1
-            child[gene_idx] = min(
-                max(child[gene_idx] + perturb, bounds[gene_idx][0]),
-                bounds[gene_idx][1],
-            )
+            with time_block("mutation", extra={"impl": "fallback"}):
+                gene_idx = self._rng.randrange(self._dim)
+                span = bounds[gene_idx][1] - bounds[gene_idx][0]
+                perturb = self._rng.uniform(-0.5, 0.5) * span * 0.1
+                child[gene_idx] = min(
+                    max(child[gene_idx] + perturb, bounds[gene_idx][0]),
+                    bounds[gene_idx][1],
+                )
         return child
 
-    def step(self, generations: float = 1.0) -> None:
+    @time_section(
+        "ga_main",
+        epoch=lambda self, generations=1.0, epoch=-1: epoch,
+        extra=lambda self, generations=1.0, epoch=-1: {
+            "generations": generations,
+            "backend": "pymoo" if self._algorithm is not None else "fallback",
+        },
+    )
+    def step(self, generations: float = 1.0, *, epoch: int = -1) -> None:
         if self._algorithm is None:
             if getattr(self, "_pop", None) is None:
                 self._pop = self._init_random_population()
@@ -139,18 +250,25 @@ class StreamingGA:
                 and self._last_F is not None
                 and getattr(self, "_pop", None) is not None
             ):
-                try:
-                    scores = [float(val[0]) for val in list(self._last_F)]
-                except Exception:
-                    scores = []
-                if scores:
-                    ranked = sorted(
-                        range(len(self._pop)),
-                        key=lambda i: scores[i],
-                        reverse=True,
-                    )
-                    for idx in ranked[: min(self.cfg.elitism, len(self._pop))]:
-                        elites.append(self._pop[idx])
+                with time_block(
+                    "selection_tournament",
+                    extra={
+                        "impl": "fallback",
+                        "candidates": len(self._pop) if getattr(self, "_pop", None) else 0,
+                    },
+                ):
+                    try:
+                        scores = [float(val[0]) for val in list(self._last_F)]
+                    except Exception:
+                        scores = []
+                    if scores:
+                        ranked = sorted(
+                            range(len(self._pop)),
+                            key=lambda i: scores[i],
+                            reverse=True,
+                        )
+                        for idx in ranked[: min(self.cfg.elitism, len(self._pop))]:
+                            elites.append(self._pop[idx])
             new_pop: List[Tuple[float, ...]] = list(elites)
             while len(new_pop) < self.cfg.pop_size:
                 if center is not None:
@@ -201,7 +319,11 @@ class StreamingGA:
                     tuple(
                         min(
                             max(
-                                (center[idx] if center else self._rng.uniform(*bounds[idx]))
+                                (
+                                    center[idx]
+                                    if center
+                                    else self._sample_gene(idx, bounds)
+                                )
                                 + (self._rng.uniform(-radius, radius) if center else 0.0),
                                 bounds[idx][0],
                             ),
