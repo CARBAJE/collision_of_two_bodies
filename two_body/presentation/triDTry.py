@@ -12,6 +12,7 @@ try:  # Dependencias opcionales para la animacion 3D
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
+    from matplotlib import colors as mcolors
     import numpy as np
 
     MATPLOTLIB_AVAILABLE = True
@@ -158,7 +159,7 @@ class Visualizer(_PlanarVisualizer):
         comparison_data: MassComparisonData | None = None,
         body_labels: Sequence[str] | None = None,
         title: str = "Crecimiento de la perturbacion",
-        ylabel: str = "Distancia [m]",
+        ylabel: str = "Distancia [UA]",
         t_end: float | None = None,
         dt: float | None = None,
         total_frames: int | None = None,
@@ -347,14 +348,48 @@ class Visualizer(_PlanarVisualizer):
             linewidth=1.5,
         )
 
-        global_arr: "np.ndarray | None" = None
+        raw_global_arr: "np.ndarray | None" = None
         if global_series is not None:
-            global_arr = np.asarray(global_series, dtype=float)
-            if global_arr.size > 0:
-                valid_mask = ~np.isnan(global_arr)
-                if np.any(valid_mask):
-                    global_arr = global_arr.copy()
-                    global_arr[valid_mask] = np.minimum.accumulate(global_arr[valid_mask])
+            arr = np.asarray(global_series, dtype=float)
+            if arr.size > 0:
+                raw_global_arr = arr
+
+        def _build_cumulative_series(
+            primary: "np.ndarray",
+            secondary: "np.ndarray | None",
+        ) -> "np.ndarray | None":
+            total = primary.size
+            if total == 0:
+                return None
+            result = np.full(primary.shape, np.nan, dtype=float)
+            running_best: float | None = None
+            for idx in range(total):
+                candidates: list[float] = []
+                primary_val = primary[idx]
+                if np.isfinite(primary_val):
+                    candidates.append(float(primary_val))
+                if secondary is not None and secondary.shape == primary.shape:
+                    secondary_val = secondary[idx]
+                    if np.isfinite(secondary_val):
+                        candidates.append(float(secondary_val))
+
+                if candidates:
+                    current_best = min(candidates)
+                    if running_best is not None:
+                        current_best = min(current_best, running_best)
+                    result[idx] = current_best
+                    running_best = current_best
+                elif running_best is not None:
+                    result[idx] = running_best
+            if np.isnan(result).all():
+                return None
+            return result
+
+        global_arr = _build_cumulative_series(short_arr, raw_global_arr)
+        if global_arr is None and raw_global_arr is not None:
+            global_arr = _build_cumulative_series(raw_global_arr, None)
+
+        if global_arr is not None:
             ax.plot(
                 epoch_arr,
                 global_arr,
@@ -391,15 +426,42 @@ class Visualizer(_PlanarVisualizer):
                 )
 
         if annotate_best:
-            reference = (
-                global_arr
-                if global_arr is not None and not np.isnan(global_arr).all()
-                else short_arr
-            )
-            if reference.size > 0 and not np.isnan(reference).all():
-                best_idx = int(np.nanargmin(reference))
+            best_idx: int | None = None
+            best_value: float | None = None
+
+            def _consider_series(series: "np.ndarray | None") -> None:
+                nonlocal best_idx, best_value
+                if series is None:
+                    return
+                finite_mask = np.isfinite(series)
+                if not np.any(finite_mask):
+                    return
+                finite_indices = np.flatnonzero(finite_mask)
+                finite_values = series[finite_mask]
+                local_idx = int(np.argmin(finite_values))
+                candidate_idx = int(finite_indices[local_idx])
+                candidate_value = float(finite_values[local_idx])
+
+                if best_value is None:
+                    best_idx = candidate_idx
+                    best_value = candidate_value
+                    return
+
+                if candidate_value < best_value - 1e-12:
+                    best_idx = candidate_idx
+                    best_value = candidate_value
+                    return
+
+                if np.isclose(candidate_value, best_value, rtol=1e-9, atol=1e-12):
+                    if best_idx is None or candidate_idx < best_idx:
+                        best_idx = candidate_idx
+                        best_value = candidate_value
+
+            _consider_series(global_arr)
+            _consider_series(short_arr)
+
+            if best_idx is not None and best_value is not None and np.isfinite(best_value):
                 best_epoch = epoch_arr[best_idx]
-                best_value = reference[best_idx]
                 ax.scatter(
                     [best_epoch],
                     [best_value],
@@ -407,8 +469,9 @@ class Visualizer(_PlanarVisualizer):
                     zorder=5,
                     label="Mejor lambda",
                 )
+                display_epoch = int(best_epoch) if np.isclose(best_epoch, round(best_epoch)) else best_epoch
                 ax.annotate(
-                    f"lambda={best_value:.4g}\nepoca={int(best_epoch)}",
+                    f"lambda={best_value:.4g}\nepoca={display_epoch}",
                     xy=(best_epoch, best_value),
                     xytext=(5, -25),
                     textcoords="offset points",
@@ -853,6 +916,19 @@ class Visualizer(_PlanarVisualizer):
         ]
         colors = plt.cm.get_cmap("tab10", data.n_bodies)(np.arange(data.n_bodies))
 
+        def _blend_color(base_color: Any, target: str, weight: float) -> tuple[float, float, float]:
+            base_rgb = np.array(mcolors.to_rgb(base_color), dtype=float)
+            target_rgb = np.array(mcolors.to_rgb(target), dtype=float)
+            mixed = (1.0 - weight) * base_rgb + weight * target_rgb
+            return tuple(np.clip(mixed, 0.0, 1.0))
+
+        overlay_original_colors = [
+            _blend_color(color, "white", 0.35) for color in colors
+        ]
+        overlay_optimized_colors = [
+            _blend_color(color, "black", 0.25) for color in colors
+        ]
+
         def _configure_axis(ax: Any, subtitle: str) -> None:
             ax.set_title(subtitle)
             ax.set_xlabel("X")
@@ -889,17 +965,19 @@ class Visualizer(_PlanarVisualizer):
                 data.original_xyz[:, body_idx, 0],
                 data.original_xyz[:, body_idx, 1],
                 data.original_xyz[:, body_idx, 2],
-                color=colors[body_idx],
-                linestyle="--",
-                alpha=0.6,
+                color=overlay_original_colors[body_idx],
+                linestyle=(0, (4, 2)),
+                linewidth=1.6,
+                alpha=0.85,
             )
             axes[2].plot(
                 data.optimized_xyz[:, body_idx, 0],
                 data.optimized_xyz[:, body_idx, 1],
                 data.optimized_xyz[:, body_idx, 2],
-                color=colors[body_idx],
+                color=overlay_optimized_colors[body_idx],
                 linestyle="-",
-                alpha=0.9,
+                linewidth=2.1,
+                alpha=0.95,
             )
 
         orig_points = [
@@ -931,8 +1009,11 @@ class Visualizer(_PlanarVisualizer):
                 [data.original_xyz[0, idx, 2]],
                 marker="o",
                 markersize=5,
-                color=colors[idx],
-                alpha=0.7,
+                color=overlay_original_colors[idx],
+                markerfacecolor="none",
+                markeredgecolor=overlay_original_colors[idx],
+                markeredgewidth=1.4,
+                alpha=0.85,
             )[0]
             for idx in range(data.n_bodies)
         ]
@@ -943,7 +1024,10 @@ class Visualizer(_PlanarVisualizer):
                 [data.optimized_xyz[0, idx, 2]],
                 marker="o",
                 markersize=5,
-                color=colors[idx],
+                color=overlay_optimized_colors[idx],
+                markerfacecolor=overlay_optimized_colors[idx],
+                markeredgecolor=overlay_optimized_colors[idx],
+                markeredgewidth=1.2,
                 alpha=1.0,
             )[0]
             for idx in range(data.n_bodies)
@@ -989,9 +1073,33 @@ class Visualizer(_PlanarVisualizer):
             frameon=False,
         )
         axes[2].add_artist(body_legend)
+        sample_orig_color = overlay_original_colors[0] if overlay_original_colors else (0.6, 0.6, 0.6)
+        sample_opt_color = overlay_optimized_colors[0] if overlay_optimized_colors else (0.3, 0.3, 0.3)
         scenario_handles = [
-            Line2D([0], [0], color="black", linestyle="--", label="Original"),
-            Line2D([0], [0], color="black", linestyle="-", label="Optimizado"),
+            Line2D(
+                [0],
+                [0],
+                color=sample_orig_color,
+                linestyle=(0, (4, 2)),
+                linewidth=1.8,
+                marker="o",
+                markerfacecolor="none",
+                markeredgecolor=sample_orig_color,
+                markeredgewidth=1.2,
+                label="Original",
+            ),
+            Line2D(
+                [0],
+                [0],
+                color=sample_opt_color,
+                linestyle="-",
+                linewidth=2.2,
+                marker="o",
+                markerfacecolor=sample_opt_color,
+                markeredgecolor=sample_opt_color,
+                markeredgewidth=1.0,
+                label="Optimizado",
+            ),
         ]
         axes[2].legend(
             handles=scenario_handles,
