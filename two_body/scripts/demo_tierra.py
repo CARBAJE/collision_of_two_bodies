@@ -136,7 +136,7 @@ def build_config(opts: DemoOptions) -> Config:
         ),
         v0=(
             (0.0, 0.0, 0.0),
-            (0.0, 2 * np.pi, 0.0),  # 1 orbita por ano
+            (0.0, 2 * np.pi, 0.0),  # 1 orbita por año
         ),
         mass_bounds=(
             (1.0, 1.0),

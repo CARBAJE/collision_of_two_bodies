@@ -121,3 +121,10 @@ two_body/data/timings/timings_7d6250a1-1710-478f-8678-e1a54c587a25_20251103_0003
 two_body/data/timings/timings_b944856b-e5ce-4cdb-8208-9b8758e3bfa4_20251103_000326.csv
 two_body/data/timings/timings_da591e96-f643-4abe-b6a8-be1f84342107_20251103_000324.csv
 two_body/data/timings/timings_ddf0b833-a5c4-4572-b8c0-19a388d2f328_20251103_000322.csv
+two_body/reports/caso03-metricasTiempo.png
+two_body/reports/caso04-metricasTiempo.png
+two_body/reports/timeline_by_batch_da591e96-f643-4abe-b6a8-be1f84342107.png
+two_body/reports/timeline_by_batch_ddf0b833-a5c4-4572-b8c0-19a388d2f328.png
+two_body/reports/timeline_by_individual_da591e96-f643-4abe-b6a8-be1f84342107.png
+two_body/reports/timeline_simulation_da591e96-f643-4abe-b6a8-be1f84342107.png
+two_body/reports/timeline_simulation_ddf0b833-a5c4-4572-b8c0-19a388d2f328.png
