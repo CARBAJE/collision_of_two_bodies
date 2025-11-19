@@ -2,6 +2,23 @@ import customtkinter as ctk
 import tkinter as tk
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import sys
+import os
+
+# 1. Definir el directorio actual (donde está streamlit_app.py)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# 2. Subir un nivel para llegar al directorio raíz del proyecto
+#    (El directorio que contiene las carpetas 'two_body' y 'ui')
+project_root = os.path.join(current_dir, '..')
+
+# 3. Agregar el directorio raíz a la ruta de búsqueda de módulos de Python (sys.path)
+sys.path.append(project_root)
+
+from two_body.core.config import Config 
+from two_body.logic.controller import ContinuousOptimizationController
+from two_body.simulation.rebound_adapter import ReboundSim
+from two_body.presentation.triDTry import Visualizer as Visualizer3D
 
 ctk.set_appearance_mode("System")  
 ctk.set_default_color_theme("blue") 
@@ -9,11 +26,16 @@ ctk.set_default_color_theme("blue")
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+
         self.geometry(f"{1200}x{700}")
         self.grid_columnconfigure(0, weight=0, minsize=180) 
         self.grid_columnconfigure(1, weight=3)             
         self.grid_columnconfigure(2, weight=1, minsize=300) 
         self.grid_rowconfigure(0, weight=1)
+
+        self.body_entries = {}
+        self.opt_entries = {}
+        self.analysis_canvases = {}
 
         # ---BARRA LATERAL IZQUIERDA: Panel de Control ---
         self.frame_control = ctk.CTkFrame(self, corner_radius=0)
@@ -31,6 +53,7 @@ class App(ctk.CTk):
         self.frame_analysis.grid(row=0, column=2, sticky="nsew")
         self.frame_analysis.grid_columnconfigure(0, weight=1)
         self.render_analysis_panel()
+
 
     # --- Funciones para Renderizar Contenido de los Paneles ---
 
@@ -72,50 +95,79 @@ class App(ctk.CTk):
         self.render_optimization_params(frame_optimizacion)
         
         # Botón de Inicio
-        ctk.CTkButton(self.frame_control, text="Iniciar Optimización", fg_color="green").pack(pady=20, padx=10, fill="x")
+        ctk.CTkButton(self.frame_control, text="Iniciar Optimización", fg_color="green", command=self.run_optimization).pack(pady=20, padx=10, fill="x")
 
 
     def render_body_controls(self, parent_frame, title, mass_val, pos_val, vel_val):
-        """Plantilla para los controles de un cuerpo con compresión máxima."""
+        """
+        Plantilla para los controles de un cuerpo, ahora almacenando las referencias 
+        de los widgets de entrada en self.body_entries.
+        """
         
         frame_body = ctk.CTkFrame(parent_frame, fg_color="transparent", border_width=1, border_color="#333")
-        frame_body.pack(pady=(5, 7), padx=0, fill="x") # Reducimos pady para ahorrar espacio vertical
+        frame_body.pack(pady=(5, 7), padx=0, fill="x")
         
         ctk.CTkLabel(frame_body, text=title, font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=5, pady=(3,0)) 
 
         inner_frame = ctk.CTkFrame(frame_body, fg_color="transparent")
         inner_frame.pack(padx=5, pady=3, fill="x")
         
-        # Columna 0 y 2 (Etiquetas) tienen weight=2
-        inner_frame.columnconfigure((0, 2), weight=2) 
-        # Columna 1 y 3 (Entradas) tienen weight=1 
+        inner_frame.columnconfigure((0, 2), weight=2)
         inner_frame.columnconfigure((1, 3), weight=1) 
+        
+        prefix = title.replace(" ", "_") 
 
         # --- Fila 0: Masa ---
-        ctk.CTkLabel(inner_frame, text="Masa (M):", font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w", pady=1) # Fuente 11
-        ctk.CTkEntry(inner_frame, placeholder_text=f"{mass_val:.2f}", height=22).grid(row=0, column=1, columnspan=3, sticky="ew", padx=(5, 0), pady=1)
+        ctk.CTkLabel(inner_frame, text="Masa (M):", font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w", pady=1)
+        entry_mass = ctk.CTkEntry(inner_frame, placeholder_text=f"{mass_val:.2f}", height=22)
+        entry_mass.grid(row=0, column=1, columnspan=3, sticky="ew", padx=(5, 0), pady=1)
+        self.body_entries[f"{prefix}_mass"] = entry_mass 
+        # Rellenamos con el valor de ejemplo
+        entry_mass.insert(0, f"{mass_val:.2f}")
 
         # --- Fila 1: Posición X y Posición Y ---
         ctk.CTkLabel(inner_frame, text="Posición X:", font=ctk.CTkFont(size=11)).grid(row=1, column=0, sticky="w", pady=1)
-        ctk.CTkEntry(inner_frame, placeholder_text=str(pos_val[0]), height=22).grid(row=1, column=1, sticky="ew", padx=5, pady=1)
+        entry_pos_x = ctk.CTkEntry(inner_frame, placeholder_text=str(pos_val[0]), height=22)
+        entry_pos_x.grid(row=1, column=1, sticky="ew", padx=5, pady=1)
+        self.body_entries[f"{prefix}_pos_x"] = entry_pos_x
+        entry_pos_x.insert(0, str(pos_val[0]))
+
         ctk.CTkLabel(inner_frame, text="Posición Y:", font=ctk.CTkFont(size=11)).grid(row=1, column=2, sticky="w", pady=1)
-        ctk.CTkEntry(inner_frame, placeholder_text=str(pos_val[1]), height=22).grid(row=1, column=3, sticky="ew", padx=5, pady=1)
+        entry_pos_y = ctk.CTkEntry(inner_frame, placeholder_text=str(pos_val[1]), height=22)
+        entry_pos_y.grid(row=1, column=3, sticky="ew", padx=5, pady=1)
+        self.body_entries[f"{prefix}_pos_y"] = entry_pos_y
+        entry_pos_y.insert(0, str(pos_val[1]))
 
         # --- Fila 2: Posición Z y Velocidad X ---
         ctk.CTkLabel(inner_frame, text="Posición Z:", font=ctk.CTkFont(size=11)).grid(row=2, column=0, sticky="w", pady=1)
-        ctk.CTkEntry(inner_frame, placeholder_text=str(pos_val[2]), height=22).grid(row=2, column=1, sticky="ew", padx=5, pady=1)
+        entry_pos_z = ctk.CTkEntry(inner_frame, placeholder_text=str(pos_val[2]), height=22)
+        entry_pos_z.grid(row=2, column=1, sticky="ew", padx=5, pady=1)
+        self.body_entries[f"{prefix}_pos_z"] = entry_pos_z
+        entry_pos_z.insert(0, str(pos_val[2]))
+
         ctk.CTkLabel(inner_frame, text="Velocidad X:", font=ctk.CTkFont(size=11)).grid(row=2, column=2, sticky="w", pady=1)
-        ctk.CTkEntry(inner_frame, placeholder_text=str(vel_val[0]), height=22).grid(row=2, column=3, sticky="ew", padx=5, pady=1)
+        entry_vel_x = ctk.CTkEntry(inner_frame, placeholder_text=str(vel_val[0]), height=22)
+        entry_vel_x.grid(row=2, column=3, sticky="ew", padx=5, pady=1)
+        self.body_entries[f"{prefix}_vel_x"] = entry_vel_x
+        entry_vel_x.insert(0, str(vel_val[0]))
 
         # --- Fila 3: Velocidad Y y Velocidad Z ---
         ctk.CTkLabel(inner_frame, text="Velocidad Y:", font=ctk.CTkFont(size=11)).grid(row=3, column=0, sticky="w", pady=1)
-        ctk.CTkEntry(inner_frame, placeholder_text=str(vel_val[1]), height=22).grid(row=3, column=1, sticky="ew", padx=5, pady=1)
+        entry_vel_y = ctk.CTkEntry(inner_frame, placeholder_text=str(vel_val[1]), height=22)
+        entry_vel_y.grid(row=3, column=1, sticky="ew", padx=5, pady=1)
+        self.body_entries[f"{prefix}_vel_y"] = entry_vel_y
+        entry_vel_y.insert(0, str(vel_val[1]))
+
         ctk.CTkLabel(inner_frame, text="Velocidad Z:", font=ctk.CTkFont(size=11)).grid(row=3, column=2, sticky="w", pady=1)
-        ctk.CTkEntry(inner_frame, placeholder_text=str(vel_val[2]), height=22).grid(row=3, column=3, sticky="ew", padx=5, pady=1)
+        entry_vel_z = ctk.CTkEntry(inner_frame, placeholder_text=str(vel_val[2]), height=22)
+        entry_vel_z.grid(row=3, column=3, sticky="ew", padx=5, pady=1)
+        self.body_entries[f"{prefix}_vel_z"] = entry_vel_z
+        entry_vel_z.insert(0, str(vel_val[2]))
 
 
     def render_optimization_params(self, parent_frame):
-        """Renderiza los parámetros para el algoritmo genético con layout de dos entradas por fila."""
+        """Renderiza los parámetros para el algoritmo genético y almacena las referencias."""
+        
         frame_opt = ctk.CTkFrame(parent_frame, fg_color="transparent")
         frame_opt.pack(pady=5, padx=0, fill="x")
         
@@ -123,29 +175,50 @@ class App(ctk.CTk):
         frame_opt.columnconfigure((0, 2), weight=2) # Etiquetas (Columna 0 y 2)
         frame_opt.columnconfigure((1, 3), weight=1) # Entradas (Columna 1 y 3)
 
-        # --- Fila 0: Nº Generaciones y Nº Individuos ---
+        # --- Fila 0: Nº Generaciones (n_gen_step) y Nº Individuos (pop_size) ---
         
-        # Columna 0 y 1: Nº Generaciones
+        # Columna 0 y 1: Nº Generaciones (Lo mapearemos a 'n_gen_step' en la Config)
         ctk.CTkLabel(frame_opt, text="Nº Generaciones:", font=ctk.CTkFont(size=11)).grid(row=0, column=0, sticky="w", pady=3)
-        ctk.CTkEntry(frame_opt, placeholder_text="100", height=22).grid(row=0, column=1, sticky="ew", padx=(5, 10), pady=3)
+        entry_gen = ctk.CTkEntry(frame_opt, placeholder_text="5", height=22) # Usamos 5 como valor del ejemplo de configuración
+        entry_gen.grid(row=0, column=1, sticky="ew", padx=(5, 10), pady=3)
+        
+        # 💾 Almacenamiento
+        self.opt_entries["n_gen_step"] = entry_gen
+        entry_gen.insert(0, "5") # Valor de ejemplo de la configuración GA (n_gen_step)
         
         # Columna 2 y 3: Nº Individuos (Tamaño de Población)
         ctk.CTkLabel(frame_opt, text="Nº Individuos:", font=ctk.CTkFont(size=11)).grid(row=0, column=2, sticky="w", pady=3)
-        ctk.CTkEntry(frame_opt, placeholder_text="50", height=22).grid(row=0, column=3, sticky="ew", padx=5, pady=3)
+        entry_pop = ctk.CTkEntry(frame_opt, placeholder_text="180", height=22) # Usamos 180 como valor del ejemplo de configuración
+        entry_pop.grid(row=0, column=3, sticky="ew", padx=5, pady=3)
+        
+        # 💾 Almacenamiento
+        self.opt_entries["pop_size"] = entry_pop
+        entry_pop.insert(0, "180") # Valor de ejemplo de la configuración GA (pop_size)
         
         # --- Fila 1: Tasa de Mutación y Peso de Periodicidad ---
         
         # Columna 0 y 1: Tasa de Mutación
         ctk.CTkLabel(frame_opt, text="Tasa Mutación:", font=ctk.CTkFont(size=11)).grid(row=1, column=0, sticky="w", pady=3)
-        ctk.CTkEntry(frame_opt, placeholder_text="0.01", height=22).grid(row=1, column=1, sticky="ew", padx=(5, 10), pady=3)
+        entry_mut = ctk.CTkEntry(frame_opt, placeholder_text="0.2", height=22) # Usamos 0.2 como valor del ejemplo
+        entry_mut.grid(row=1, column=1, sticky="ew", padx=(5, 10), pady=3)
+        
+        # 💾 Almacenamiento
+        self.opt_entries["mutation"] = entry_mut
+        entry_mut.insert(0, "0.2") # Valor de ejemplo de la configuración GA (mutation)
         
         # Columna 2 y 3: Peso de Periodicidad
         ctk.CTkLabel(frame_opt, text="Peso Periodicidad:", font=ctk.CTkFont(size=11)).grid(row=1, column=2, sticky="w", pady=3)
-        ctk.CTkEntry(frame_opt, placeholder_text="0.01", height=22).grid(row=1, column=3, sticky="ew", padx=5, pady=3)
+        entry_weight = ctk.CTkEntry(frame_opt, placeholder_text="500.0", height=22) # Usamos 500.0 como valor del ejemplo
+        entry_weight.grid(row=1, column=3, sticky="ew", padx=5, pady=3)
+        
+        # 💾 Almacenamiento
+        self.opt_entries["periodicity_weight"] = entry_weight
+        entry_weight.insert(0, "500.0") # Valor de ejemplo de la configuración (periodicity_weight)
 
 
     def render_canvas_panel(self):
         """Renderiza el área para la simulación (Canvas)."""
+        
         ctk.CTkLabel(self.frame_canvas, text="Lienzo de Simulación (Integración de Matplotlib/Canvas)", 
                      text_color="gray", font=ctk.CTkFont(size=18, slant="italic")).pack(expand=True, padx=20, pady=20)
         
@@ -179,8 +252,194 @@ class App(ctk.CTk):
         canvas_widget = FigureCanvasTkAgg(fig, master=parent_frame)
         canvas_widget.draw()
         canvas_widget.get_tk_widget().pack(pady=5, padx=10, fill="x", expand=False)
+        self.analysis_canvases[plot_name] = canvas_widget
         
+    def _slice_vectors(vectors, count):
+                if len(vectors) < count:
+                    raise ValueError("Config no tiene suficientes vectores iniciales")
+                return tuple(tuple(float(coord) for coord in vectors[i]) for i in range(count))
+
+    def run_optimization(self):
+        """Genera el objeto Config a partir de la GUI y ejecuta el controlador."""
         
+        # 1. Recolección y Validación de Datos (Muy simplificado)
+        
+        try:
+            # 1.1. Parámetros Físicos (Masas, R0, V0)
+            r0_list = []
+            v0_list = []
+            masses = []
+            
+            for i in range(1, 4): # Asumiendo Cuerpo 1, Cuerpo 2, Cuerpo 3
+                prefix = f"Cuerpo_{i}"
+                
+                # Masas
+                mass = float(self.body_entries[f"{prefix}_mass"].get() or "1.0")
+                masses.append(mass) # Usaremos la masa central para los bounds
+                
+                # Posición (R0)
+                px = float(self.body_entries[f"{prefix}_pos_x"].get() or "0.0")
+                py = float(self.body_entries[f"{prefix}_pos_y"].get() or "0.0")
+                pz = float(self.body_entries[f"{prefix}_pos_z"].get() or "0.0")
+                r0_list.append((px, py, pz))
+                
+                # Velocidad (V0)
+                vx = float(self.body_entries[f"{prefix}_vel_x"].get() or "0.0")
+                vy = float(self.body_entries[f"{prefix}_vel_y"].get() or "0.0")
+                vz = float(self.body_entries[f"{prefix}_vel_z"].get() or "0.0")
+                v0_list.append((vx, vy, vz))
+                
+            # 1.2. Parámetros de Optimización (GA)
+            pop_size = int(self.opt_entries["pop_size"].get() or "64")
+            mutation = float(self.opt_entries["mutation"].get() or "0.2")
+            periodicity_weight = float(self.opt_entries["periodicity_weight"].get() or "0.0")
+            n_gen_step = int(self.opt_entries["n_gen_step"].get() or "5") # Usando la entrada de Nº Generaciones
+            
+            # 2. Creación del Diccionario 'case' (Similar a tu ejemplo)
+            gui_case_dict = {
+                # SIMULACIÓN (Usando valores por defecto o predefinidos)
+                "r0": tuple(r0_list),
+                "v0": tuple(v0_list),
+                "t_end_short": 0.5, 
+                "t_end_long": 4.0, 
+                "dt": 0.0002,
+                "integrator": "ias15",
+                "periodicity_weight": periodicity_weight,
+                
+                # FÍSICOS (Generamos un rango +/- 10% alrededor de la masa de la GUI)
+                "mass_bounds": tuple([(m * 0.9, m * 1.1) for m in masses]),
+                "G": 39.47841760435743,
+                
+                # GA
+                "pop_size": pop_size,
+                "mutation": mutation,
+                "n_gen_step": n_gen_step,
+                # ... (Otros valores GA se tomarán del Config por defecto)
+                
+                # I/O
+                "artifacts_dir": "artifacts/gui_run",
+                "headless": True,
+            }
+
+            # 3. Creación del Objeto Config
+            cfg = Config(**gui_case_dict)
+            
+            # 4. Ejecución Cronometrada
+            self.update_status("Iniciando optimización...")
+            
+            controller = ContinuousOptimizationController(cfg)
+
+            results = controller.run()
+            metrics = controller.metrics
+
+            print(results)
+            self.update_status(f"Optimización finalizada. Mejor Fitness: {results["best"]['fitness']:.4e}")
+            
+            sim_builder = ReboundSim(G=cfg.G, integrator=cfg.integrator)
+            best_masses = tuple(results["best"]["masses"])
+
+            
+
+            r0 = self._slice_vectors(cfg.r0, len(best_masses))
+            v0 = self._slice_vectors(cfg.v0, len(best_masses))
+
+            sim = sim_builder.setup_simulation(best_masses, r0, v0)
+            traj = sim_builder.integrate(sim, t_end=cfg.t_end_long, dt=cfg.dt)
+            print("Trayectoria calculada con masas óptimas.")
+            print(traj.shape)
+            print(traj[-1])
+            xyz_tracks = [traj[:, i, :3] for i in range(traj.shape[1])]
+
+            viz_3d = Visualizer3D(headless=cfg.headless)
+
+            self.update_analysis_plots(metrics, viz_3d)
+
+            viz_3d = Visualizer3D(headless=False)
+
+            self.update_canvas_3d_animation(viz_3d, xyz_tracks, best_masses)
+
+
+            
+        except ValueError as e:
+            self.update_status(f"Error de entrada: Verifica que todos los campos sean números. {e}", color="red")
+        except Exception as e:
+            self.update_status(f"Error de ejecución: {e}", color="red")
+        
+    def update_status(self, message, color="white"):
+        """Método simple para actualizar un estado en la GUI (necesita ser implementado)."""
+        print(f"ESTADO: {message}")
+    
+    def update_analysis_plots(self, metrics, viz_3d):
+        """
+        Actualiza las gráficas de lambda y fitness en el panel de análisis 
+        utilizando el objeto viz_3d (Visualizer3D).
+        """
+        
+        # 1. Eliminar la gráfica anterior (Placeholder)
+        # Obtenemos la referencia al widget de tkinter para destruirlo
+        if 'lyapunov' in self.analysis_canvases:
+            self.analysis_canvases['lyapunov'].get_tk_widget().destroy()
+            self.analysis_canvases['fitness'].get_tk_widget().destroy()
+
+        # 2. Recrear y empaquetar la gráfica de Evolución de Lambda (Lyapunov)
+        fig_lambda = viz_3d.plot_lambda_evolution(
+            lambda_history=metrics.best_lambda_per_epoch,
+            epoch_history=metrics.epoch_history,
+            title="Exponente de Lyapunov (λ)",
+            moving_average_window=5,
+        )
+        canvas_lambda = FigureCanvasTkAgg(fig_lambda, master=self.frame_analysis)
+        canvas_lambda.draw()
+        # Insertar en la posición de la gráfica de Lyapunov (se empaqueta donde estaba el anterior)
+        canvas_lambda.get_tk_widget().pack(pady=5, padx=10, fill="x", expand=False)
+        self.analysis_canvases['lyapunov'] = canvas_lambda # Guardar nueva referencia
+
+        # 3. Recrear y empaquetar la gráfica de Evolución del Fitness
+        fig_fitness = viz_3d.plot_fitness_evolution(
+            fitness_history=metrics.best_fitness_per_epoch,
+            epoch_history=metrics.epoch_history,
+            title="Evolución del Fitness",
+            moving_average_window=5,
+        )
+        canvas_fitness = FigureCanvasTkAgg(fig_fitness, master=self.frame_analysis)
+        canvas_fitness.draw()
+        # Insertar en la posición de la gráfica de Fitness
+        canvas_fitness.get_tk_widget().pack(pady=5, padx=10, fill="x", expand=False)
+        self.analysis_canvases['fitness'] = canvas_fitness # Guardar nueva referencia
+
+    def update_canvas_3d_animation(self, viz_3d, xyz_tracks, best_masses):
+        """
+        Integra la animación 3D de órbitas en el panel central (self.frame_canvas).
+        """
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        import matplotlib.pyplot as plt
+
+        # 1. Limpiar el panel central
+        for widget in self.frame_canvas.winfo_children():
+            widget.destroy()
+
+        # 2. Obtener la figura y la animación desde el Visualizer
+        try:
+            fig_3d, self.animation_ref = viz_3d.animate_3d(
+                trajectories=xyz_tracks,
+                title=f"Trayectorias 3D m1={best_masses[0]:.3f}, m2={best_masses[1]:.3f}",
+                total_frames=len(xyz_tracks[0]),
+                interval_ms=50
+            )
+        except Exception as e:
+            self.update_status(f"Error al crear animación 3D: {e}", color="red")
+            return
+
+        # 3. Integrar la figura en el Canvas de CustomTkinter
+        canvas_3d = FigureCanvasTkAgg(fig_3d, master=self.frame_canvas)
+        canvas_3d.draw()
+        
+        canvas_3d.get_tk_widget().pack(fill="both", expand=True, padx=5, pady=5)
+        
+        plt.close(fig_3d) 
+
+        self.update_status("✅ Animación 3D de órbita cargada en el panel central.")
+
 if __name__ == "__main__":
     app = App()
     app.mainloop()

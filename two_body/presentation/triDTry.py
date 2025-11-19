@@ -66,7 +66,7 @@ class Visualizer(_PlanarVisualizer):
         interval_ms: int = 50,
         title: str = "Simulacion de orbita en 3D",
         total_frames: int = 300,
-    ) -> FuncAnimation | None:
+    ) -> tuple[plt.Figure, FuncAnimation] | None:
         """
         Crea y muestra (o cierra en modo headless) una animacion 3D de las trayectorias.
         """
@@ -142,12 +142,12 @@ class Visualizer(_PlanarVisualizer):
             repeat=True,
         )
 
-        if self.headless:
-            plt.close(fig)
-        else:
-            plt.show()
+        # if self.headless:
+        #     plt.close(fig)
+        # else:
+        #     plt.show()
 
-        return ani
+        return fig, ani
 
     def plot_mass_distance_evolution(
         self,
