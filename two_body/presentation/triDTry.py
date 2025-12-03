@@ -150,6 +150,127 @@ class Visualizer(_PlanarVisualizer):
 
         return fig, ani
 
+    def animate_comparison_3d(
+        self,
+        trajectories_1: Sequence[Trajectory3D],
+        trajectories_2: Sequence[Trajectory3D],
+        interval_ms: int = 50,
+        title: str = "Comparacion de Trayectorias (Original vs Optimizado)",
+        total_frames: int = 300,
+        figsize: tuple[float, float] = (10, 10),
+        labels: tuple[str, str] = ("Original", "Optimizado"),
+    ) -> tuple[plt.Figure, FuncAnimation] | None:
+        """
+        Crea una animacion superpuesta de dos sets de trayectorias.
+        """
+        if not trajectories_1 or not trajectories_2:
+            raise ValueError("Se requieren ambos sets de trayectorias.")
+
+        if not MATPLOTLIB_AVAILABLE:
+            return None
+
+        # Procesar datos 1
+        arrays_1 = [np.asarray(traj, dtype=float) for traj in trajectories_1]
+        min_len_1 = min(traj.shape[0] for traj in arrays_1)
+        
+        # Procesar datos 2
+        arrays_2 = [np.asarray(traj, dtype=float) for traj in trajectories_2]
+        min_len_2 = min(traj.shape[0] for traj in arrays_2)
+
+        if total_frames <= 0 or min_len_1 == 0 or min_len_2 == 0:
+            raise ValueError("Trayectorias insuficientes.")
+
+        num_frames = min(total_frames, min_len_1, min_len_2)
+        
+        trimmed_1 = [traj[:num_frames, :3] for traj in arrays_1]
+        trimmed_2 = [traj[:num_frames, :3] for traj in arrays_2]
+        
+        all_data = np.concatenate(trimmed_1 + trimmed_2, axis=0)
+
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection="3d")
+        ax.set_title(title)
+        ax.set_xlabel("X [UA]")
+        ax.set_ylabel("Y [UA]")
+        ax.set_zlabel("Z [UA]")
+        ax.grid(True)
+
+        # Configurar limites
+        ranges = all_data.ptp(axis=0)
+        max_range = ranges.max() / 2.0 if ranges.size else 1.0
+        centers = all_data.mean(axis=0)
+        ax.set_xlim(centers[0] - max_range, centers[0] + max_range)
+        ax.set_ylim(centers[1] - max_range, centers[1] + max_range)
+        ax.set_zlim(centers[2] - max_range, centers[2] + max_range)
+
+        # Colores base para los cuerpos (ciclo de colores)
+        prop_cycle = plt.rcParams['axes.prop_cycle']
+        colors = prop_cycle.by_key()['color']
+
+        lines_1 = []
+        points_1 = []
+        lines_2 = []
+        points_2 = []
+
+        # Graficar Set 1 (Original) - Punteado y Transparente
+        for idx, traj in enumerate(trimmed_1):
+            color = colors[idx % len(colors)]
+            # Linea completa estatica (referencia)
+            ax.plot(traj[:, 0], traj[:, 1], traj[:, 2], 
+                   linestyle=":", alpha=0.3, color=color, linewidth=1)
+            
+            # Punto movil
+            point, = ax.plot([traj[0, 0]], [traj[0, 1]], [traj[0, 2]], 
+                            marker="o", markersize=4, color=color, alpha=0.5,
+                            label=f"{labels[0]} C{idx+1}" if idx == 0 else "")
+            points_1.append(point)
+
+        # Graficar Set 2 (Optimizado) - Solido
+        for idx, traj in enumerate(trimmed_2):
+            color = colors[idx % len(colors)]
+            # Linea completa estatica (referencia)
+            ax.plot(traj[:, 0], traj[:, 1], traj[:, 2], 
+                   linestyle="-", alpha=0.5, color=color, linewidth=1.5)
+            
+            # Punto movil
+            point, = ax.plot([traj[0, 0]], [traj[0, 1]], [traj[0, 2]], 
+                            marker="*", markersize=8, color=color,
+                            label=f"{labels[1]} C{idx+1}" if idx == 0 else "")
+            points_2.append(point)
+
+        ax.legend(loc='upper right', fontsize='small')
+
+        def update_frame(frame_index: int) -> list[Any]:
+            artists = []
+            
+            # Actualizar Set 1
+            for point, traj in zip(points_1, trimmed_1):
+                x, y, z = traj[frame_index, :3]
+                point.set_data([x], [y])
+                point.set_3d_properties([z])
+                artists.append(point)
+            
+            # Actualizar Set 2
+            for point, traj in zip(points_2, trimmed_2):
+                x, y, z = traj[frame_index, :3]
+                point.set_data([x], [y])
+                point.set_3d_properties([z])
+                artists.append(point)
+
+            ax.set_title(f"{title}\nFrame: {frame_index}/{num_frames}")
+            return artists
+
+        ani = animation.FuncAnimation(
+            fig,
+            update_frame,
+            frames=num_frames,
+            interval=interval_ms,
+            blit=False,
+            repeat=True,
+        )
+
+        return fig, ani
+
     def plot_mass_distance_evolution(
         self,
         original_masses: Sequence[float] | None = None,
@@ -166,6 +287,7 @@ class Visualizer(_PlanarVisualizer):
         total_frames: int | None = None,
         r0: Sequence[Sequence[float]] | None = None,
         v0: Sequence[Sequence[float]] | None = None,
+        figsize: tuple[float, float] = (8, 5),
     ) -> Figure | None:
         """
         Grafica la evolucion estatica (no animada) de ``||R_2 - R||`` para cada cuerpo.
@@ -203,7 +325,7 @@ class Visualizer(_PlanarVisualizer):
             data = comparison_data
 
         distances = np.linalg.norm(data.optimized_xyz - data.original_xyz, axis=2)
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, ax = plt.subplots(figsize=figsize)
         ax.set_title(title)
         ax.set_xlabel("Paso (k)")
         ax.set_ylabel(ylabel)

@@ -256,6 +256,10 @@ class App(ctk.CTk):
         # Se reduce el figsize para que ocupe menos espacio. Antes era (3, 2).
         self.draw_plot_placeholder(self.frame_analysis, "fitness", figsize=(3, 1.5))
 
+        # --- Gráfica 3: Comparación de Posiciones ---
+        ctk.CTkLabel(self.frame_analysis, text="Diferencia de Posición (||R2-R||)").pack(pady=(15,0))
+        self.draw_plot_placeholder(self.frame_analysis, "position_diff", figsize=(3, 1.5))
+
         # --- Métrica de ejemplo ---
         self.best_fitness_label = ctk.CTkLabel(self.frame_analysis, text="Mejor Fitness: N/A", text_color="green")
         self.best_fitness_label.pack(pady=(20, 5))
@@ -358,6 +362,17 @@ class App(ctk.CTk):
             self.update_status(f"Optimización finalizada. Mejor Fitness: {best_fitness:.4e}", color="green")
             self.best_fitness_label.configure(text=f"Mejor Fitness: {best_fitness:.4e}")
 
+            # 4.1. Generar Trayectorias ORIGINALES (Simulacion con valores iniciales de la GUI)
+            # Usamos las masas iniciales recolectadas en el paso 1.1
+            sim_builder_orig = ReboundSim(G=cfg.G, integrator=cfg.integrator)
+            r0_orig = self._slice_vectors(cfg.r0, len(masses))
+            v0_orig = self._slice_vectors(cfg.v0, len(masses))
+            
+            sim_orig = sim_builder_orig.setup_simulation(tuple(masses), r0_orig, v0_orig)
+            traj_orig = sim_builder_orig.integrate(sim_orig, t_end=cfg.t_end_long, dt=cfg.dt)
+            xyz_tracks_original = [traj_orig[:, i, :3] for i in range(traj_orig.shape[1])]
+
+            # 4.2. Generar Trayectorias OPTIMIZADAS (Ya calculadas)
             # Inicialización del simulador para la trayectoria final
             sim_builder = ReboundSim(G=cfg.G, integrator=cfg.integrator)
             best_masses = tuple(results["best"]["masses"])
@@ -368,16 +383,16 @@ class App(ctk.CTk):
             sim = sim_builder.setup_simulation(best_masses, r0, v0)
             traj = sim_builder.integrate(sim, t_end=cfg.t_end_long, dt=cfg.dt)
 
-            xyz_tracks = [traj[:, i, :3] for i in range(traj.shape[1])]
+            xyz_tracks_optimized = [traj[:, i, :3] for i in range(traj.shape[1])]
 
             # Usamos un Visualizer3D para las gráficas 2D
             viz_3d_analysis = Visualizer3D(headless=True) # Headless para las gráficas 2D
 
-            self.update_analysis_plots(metrics, viz_3d_analysis)
+            self.update_analysis_plots(metrics, viz_3d_analysis, xyz_tracks_original, xyz_tracks_optimized)
 
             # Usamos otro Visualizer3D para la animación (o reusamos con headless=False, pero mejor uno nuevo)
             viz_3d_animation = Visualizer3D(headless=False)
-            self.update_canvas_3d_animation(viz_3d_animation, xyz_tracks, best_masses)
+            self.update_canvas_3d_animation(viz_3d_animation, xyz_tracks_original, xyz_tracks_optimized, best_masses)
 
         except ValueError as e:
             self.update_status(f"Error de entrada: Verifica que todos los campos sean números. Detalle: {e}", color="red")
@@ -390,13 +405,13 @@ class App(ctk.CTk):
         if hasattr(self, 'status_label'):
             self.status_label.configure(text=message, text_color=color)
 
-    def update_analysis_plots(self, metrics, viz_3d):
+    def update_analysis_plots(self, metrics, viz_3d, xyz_tracks_original=None, xyz_tracks_optimized=None):
         """
         Actualiza las gráficas de lambda y fitness en el panel de análisis,
         conservando el tamaño reducido.
         """
         # Eliminar placeholders anteriores
-        for key in ['lyapunov', 'fitness']:
+        for key in ['lyapunov', 'fitness', 'position_diff']:
             if key in self.analysis_canvases:
                 # Destruye el widget de tkinter que contiene la gráfica
                 self.analysis_canvases[key].get_tk_widget().destroy()
@@ -427,6 +442,20 @@ class App(ctk.CTk):
         plt.close(fig_lambda)
         plt.close(fig_fitness)
 
+        # Recrear gráfica de Diferencia de Posición (si hay datos)
+        if xyz_tracks_original and xyz_tracks_optimized:
+            fig_diff = viz_3d.plot_mass_distance_evolution(
+                original_tracks=xyz_tracks_original,
+                optimized_tracks=xyz_tracks_optimized,
+                title="Diferencia de Posición (||R2-R||)",
+                ylabel="Distancia [UA]",
+                figsize=(6.0, 3.0),
+                body_labels=[f"Cuerpo {i+1}" for i in range(len(xyz_tracks_original))]
+            )
+            if fig_diff:
+                self._insert_plot_after_label("Diferencia de Posición (||R2-R||)", fig_diff, 'position_diff')
+                plt.close(fig_diff)
+
     def _insert_plot_after_label(self, label_text, fig, plot_key):
         """Helper para insertar un plot de Matplotlib después de una etiqueta específica."""
 
@@ -456,7 +485,7 @@ class App(ctk.CTk):
             canvas_widget.get_tk_widget().pack(pady=5, padx=10, fill="x", expand=False)
             self.analysis_canvases[plot_key] = canvas_widget
 
-    def update_canvas_3d_animation(self, viz_3d, xyz_tracks, best_masses):
+    def update_canvas_3d_animation(self, viz_3d, xyz_tracks_original, xyz_tracks_optimized, best_masses):
         """
         Integra la animación 3D de órbitas en el panel central (self.frame_canvas).
         """
@@ -471,12 +500,14 @@ class App(ctk.CTk):
 
         # 2. Obtener la figura y la animación desde el Visualizer
         try:
-            fig_3d, self.animation_ref = viz_3d.animate_3d(
-                trajectories=xyz_tracks,
-                title=f"Trayectorias 3D m1={best_masses[0]:.3f}, m2={best_masses[1]:.3f}, m3={best_masses[2]:.3f}",
-                total_frames=len(xyz_tracks[0]),
+            fig_3d, self.animation_ref = viz_3d.animate_comparison_3d(
+                trajectories_1=xyz_tracks_original,
+                trajectories_2=xyz_tracks_optimized,
+                title=f"Comparación: Original vs Optimizado\n(Mejor Fitness: {best_masses[0]:.3f}, {best_masses[1]:.3f}, {best_masses[2]:.3f})",
+                total_frames=len(xyz_tracks_optimized[0]),
                 interval_ms=50,
-                figsize=(10, 10) # Hacemos la animacion cuadrada y mas grande
+                figsize=(10, 10),
+                labels=("Original", "Optimizado")
             )
             # **IMPORTANTE para la animación**:
             # Es vital mantener la referencia a `self.animation_ref` (la animación de Matplotlib).
