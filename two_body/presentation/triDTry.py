@@ -66,6 +66,7 @@ class Visualizer(_PlanarVisualizer):
         interval_ms: int = 50,
         title: str = "Simulacion de orbita en 3D",
         total_frames: int = 300,
+        figsize: tuple[float, float] = (8, 8),
     ) -> tuple[plt.Figure, FuncAnimation] | None:
         """
         Crea y muestra (o cierra en modo headless) una animacion 3D de las trayectorias.
@@ -87,7 +88,7 @@ class Visualizer(_PlanarVisualizer):
         trimmed = [traj[:num_frames, :3] for traj in arrays]
         all_data = np.concatenate(trimmed, axis=0)
 
-        fig = plt.figure(figsize=(8, 8))
+        fig = plt.figure(figsize=figsize)
         ax = fig.add_subplot(111, projection="3d")
         ax.set_title(title)
         ax.set_xlabel("Eje X")
