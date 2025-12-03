@@ -255,6 +255,7 @@ class Visualizer(_PlanarVisualizer):
         show_moving_average: bool = True,
         moving_average_window: int = 3,
         annotate_best: bool = True,
+        figsize: tuple[float, float] = (10, 4),
     ) -> Figure | None:
         """
         Grafica la evolucion del mejor valor de lambda por epoca y (opcionalmente) el mejor global acumulado.
@@ -338,7 +339,7 @@ class Visualizer(_PlanarVisualizer):
         epoch_arr = np.asarray(epochs, dtype=float)
         short_arr = np.asarray(short_series, dtype=float)
 
-        fig, ax = plt.subplots(figsize=(10, 4))
+        fig, ax = plt.subplots(figsize=figsize)
         ax.plot(
             epoch_arr,
             short_arr,
@@ -503,6 +504,7 @@ class Visualizer(_PlanarVisualizer):
         show_moving_average: bool = True,
         moving_average_window: int = 3,
         annotate_best: bool = True,
+        figsize: tuple[float, float] = (10, 4),
     ) -> Figure | None:
         """Grafica los valores de fitness por epoca y el mejor global acumulado."""
 
@@ -589,7 +591,7 @@ class Visualizer(_PlanarVisualizer):
         epoch_arr = np.asarray(epochs, dtype=float)
         short_arr = np.asarray(short_series, dtype=float)
 
-        fig, ax = plt.subplots(figsize=(10, 4))
+        fig, ax = plt.subplots(figsize=figsize)
         ax.plot(
             epoch_arr,
             short_arr,
